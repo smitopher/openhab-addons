@@ -62,6 +62,7 @@ import org.slf4j.LoggerFactory;
  * The {@link TuyaChannelTypeProvider} generates necessary ChannelTypes.
  *
  * @author Mike Jagdis - Initial contribution
+ * @author Carlo Dischler - Detect replaced schemas
  */
 @NonNullByDefault
 @Component(immediate = true, service = { ChannelTypeProvider.class, TuyaChannelTypeProvider.class })
@@ -121,7 +122,7 @@ public class TuyaChannelTypeProvider implements ChannelTypeProvider {
     private final Bundle bundle;
     private final ChannelTypeI18nLocalizationService localizationService;
 
-    private final Map<LocalizedKey, ChannelType> channelTypes = new ConcurrentHashMap<>();
+    private final Map<LocalizedKey, GeneratedChannelType> channelTypes = new ConcurrentHashMap<>();
 
     @Activate
     public TuyaChannelTypeProvider(@Reference ChannelTypeI18nLocalizationService localizationService) {
@@ -136,20 +137,14 @@ public class TuyaChannelTypeProvider implements ChannelTypeProvider {
     @Override
     public Collection<ChannelType> getChannelTypes(@Nullable Locale locale) {
         // N.B. This only returns the channel types already generated.
-        return channelTypes.values();
+        return channelTypes.values().stream().map(GeneratedChannelType::channelType).toList();
     }
 
     @Override
+    @SuppressWarnings("PMD.CompareObjectsWithEquals")
     public @Nullable ChannelType getChannelType(ChannelTypeUID channelTypeUID, @Nullable Locale locale) {
         if (!BINDING_ID.equals(channelTypeUID.getBindingId())) {
             return null;
-        }
-
-        LocalizedKey localizedKey = getLocalizedKey(channelTypeUID, locale);
-        ChannelType channelType = channelTypes.get(localizedKey);
-
-        if (channelType != null) {
-            return channelType;
         }
 
         String channelTypeId = channelTypeUID.getId();
@@ -163,8 +158,21 @@ public class TuyaChannelTypeProvider implements ChannelTypeProvider {
         String productId = channelTypeId.substring(0, i);
         channelTypeId = channelTypeId.substring(i + 1);
 
+        Map<String, SchemaDp> schema = TuyaSchemaDB.get(productId);
+        SchemaDp schemaDp = schema != null ? schema.get(channelTypeId) : null;
+        if (schema == null || schemaDp == null) {
+            logger.warn("No schema for product {} channel type {}", productId, channelTypeId);
+            return null;
+        }
+
+        LocalizedKey localizedKey = getLocalizedKey(channelTypeUID, locale);
+        GeneratedChannelType generated = channelTypes.get(localizedKey);
+        if (generated != null && generated.schema() == schema) {
+            return generated.channelType();
+        }
+
         // Build with a channelTypeId of just the lower-cased DP identifier and set defaults for all text.
-        channelType = channelTypeFromSchema(channelTypeUID, productId, channelTypeId);
+        ChannelType channelType = channelTypeFromSchema(channelTypeId, schemaDp);
         if (channelType != null) {
             // Localize that (e.g. using channel-type.tuya.cur_voltage.label = ...)
             channelType = localizationService.createLocalizedChannelType(bundle, channelType, locale);
@@ -181,8 +189,7 @@ public class TuyaChannelTypeProvider implements ChannelTypeProvider {
             channelType = localizationService.createLocalizedChannelType(bundle, clone(channelTypeUID, channelType),
                     locale);
 
-            channelTypes.putIfAbsent(localizedKey, channelType);
-            channelType = channelTypes.get(localizedKey);
+            channelTypes.put(localizedKey, new GeneratedChannelType(schema, channelType));
         }
 
         return channelType;
@@ -224,15 +231,7 @@ public class TuyaChannelTypeProvider implements ChannelTypeProvider {
         return builder.build();
     }
 
-    private @Nullable ChannelType channelTypeFromSchema(ChannelTypeUID channelTypeUID, String productId,
-            String channelTypeId) {
-        SchemaDp schemaDp = TuyaSchemaDB.get(productId, channelTypeId);
-
-        if (schemaDp == null) {
-            logger.warn("No schema for product {} channel type {}", productId, channelTypeId);
-            return null;
-        }
-
+    private @Nullable ChannelType channelTypeFromSchema(String channelTypeId, SchemaDp schemaDp) {
         String label = schemaDp.label;
         if (label.isBlank()) {
             label = channelTypeId.replaceAll("_", " ");
@@ -305,49 +304,55 @@ public class TuyaChannelTypeProvider implements ChannelTypeProvider {
                 category = "slider";
                 configurationRef = "channel-type:tuya:dimmer";
                 tags.add(schemaDp.readOnly ? "Status" : "Control");
-                tags.add("Brightness");
-            } else if (!schemaDp.unit.isEmpty()) {
-                Unit<?> unit = schemaDp.parsedUnit;
-                if (unit == null) {
-                    unit = UnitUtils.parseUnit(schemaDp.unit);
-                    schemaDp.parsedUnit = unit;
-                }
+                tags.add("temp_value".equals(schemaDp.code) ? "ColorTemperature" : "Brightness");
 
-                if (unit != null) {
-                    String dimension = UnitUtils.getDimensionName(unit);
-                    if (dimension != null) {
-                        acceptedItemType = NUMBER + ":" + dimension;
-                        category = dimensionToCategory.getOrDefault(dimension, category);
-                        tags.add(schemaDp.readOnly ? "Measurement"
-                                : ("Time".equals(dimension) ? "Control" : "Setpoint"));
-                        String tag = dimensionToSemanticProperty.get(dimension);
-                        if (tag != null) {
-                            tags.add(tag);
-                        }
-                    } else {
-                        logger.warn("Channel {} has unit \"{}\" but openHAB doesn't know the dimension", channelTypeId,
-                                schemaDp.unit);
-
-                        tags.add(schemaDp.readOnly ? "Status" : "Setpoint");
-                    }
-                }
+                stateDescriptionFragmentBuilder = StateDescriptionFragmentBuilder.create() //
+                        .withReadOnly(schemaDp.readOnly) //
+                        .withStep(schemaDp.step);
             } else {
-                tags.add(schemaDp.readOnly ? "Status" : "Setpoint");
-            }
+                if (!schemaDp.unit.isEmpty()) {
+                    Unit<?> unit = schemaDp.parsedUnit;
+                    if (unit == null) {
+                        unit = UnitUtils.parseUnit(schemaDp.unit);
+                        schemaDp.parsedUnit = unit;
+                    }
 
-            stateDescriptionFragmentBuilder = StateDescriptionFragmentBuilder.create() //
-                    .withReadOnly(schemaDp.readOnly) //
-                    .withStep(schemaDp.step) //
-                    .withPattern("%." + schemaDp.scale + "f " + ("%".equals(schemaDp.unit) ? "%%" : "%unit%"));
+                    if (unit != null) {
+                        String dimension = UnitUtils.getDimensionName(unit);
+                        if (dimension != null) {
+                            acceptedItemType = NUMBER + ":" + dimension;
+                            category = dimensionToCategory.getOrDefault(dimension, category);
+                            tags.add(schemaDp.readOnly ? "Measurement"
+                                    : ("Time".equals(dimension) ? "Control" : "Setpoint"));
+                            String tag = dimensionToSemanticProperty.get(dimension);
+                            if (tag != null) {
+                                tags.add(tag);
+                            }
+                        } else {
+                            logger.warn("Channel {} has unit \"{}\" but openHAB doesn't know the dimension",
+                                    channelTypeId, schemaDp.unit);
 
-            Double min = schemaDp.min;
-            if (min != null) {
-                stateDescriptionFragmentBuilder.withMinimum(new BigDecimal(min));
-            }
+                            tags.add(schemaDp.readOnly ? "Status" : "Setpoint");
+                        }
+                    }
+                } else {
+                    tags.add(schemaDp.readOnly ? "Status" : "Setpoint");
+                }
 
-            Double max = schemaDp.max;
-            if (max != null) {
-                stateDescriptionFragmentBuilder.withMaximum(new BigDecimal(max));
+                stateDescriptionFragmentBuilder = StateDescriptionFragmentBuilder.create() //
+                        .withReadOnly(schemaDp.readOnly) //
+                        .withStep(schemaDp.step) //
+                        .withPattern("%." + schemaDp.scale + "f " + ("%".equals(schemaDp.unit) ? "%%" : "%unit%"));
+
+                Double min = schemaDp.min;
+                if (min != null) {
+                    stateDescriptionFragmentBuilder.withMinimum(new BigDecimal(min));
+                }
+
+                Double max = schemaDp.max;
+                if (max != null) {
+                    stateDescriptionFragmentBuilder.withMaximum(new BigDecimal(max));
+                }
             }
         } else {
             logger.warn("Don't know how to build a channel type for schema entry {} type {} - using string",
@@ -437,5 +442,11 @@ public class TuyaChannelTypeProvider implements ChannelTypeProvider {
             default:
                 return (schemaDp.readOnly ? "if:pepicons-pencil:text-bubble" : "input");
         }
+    }
+
+    /**
+     * A reloaded schema is a new map instance, so channel types generated from a previous one are stale.
+     */
+    private record GeneratedChannelType(Map<String, SchemaDp> schema, ChannelType channelType) {
     }
 }
