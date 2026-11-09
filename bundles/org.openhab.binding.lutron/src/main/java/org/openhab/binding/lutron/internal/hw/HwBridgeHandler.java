@@ -23,6 +23,7 @@ import java.util.function.Function;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.openhab.binding.lutron.internal.keypad.ButtonEvent;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.Thing;
@@ -152,7 +153,7 @@ public abstract class HwBridgeHandler extends BaseBridgeHandler {
         if (handler == null) {
             declareUnknownKeypad(address);
         } else {
-            handler.handleButton(data[0], button);
+            handler.handleButton(buttonEvent(data[0]), button);
         }
     }
 
@@ -170,8 +171,21 @@ public abstract class HwBridgeHandler extends BaseBridgeHandler {
         String address = HwAddress.normalize(data[1]);
         HwDimmerHandler handler = findHandler(HwDimmerHandler.class, address, HwDimmerHandler::getAddress);
         if (handler != null) {
-            handler.handleTap(data[0].replace("DB", "KB"));
+            handler.handleTap(buttonEvent(data[0]));
         }
+    }
+
+    /**
+     * Maps the action of a keypad button message (KBP, KBR, KBH, KBDT) or dimmer tap message (DBP, DBR, DBH, DBDT).
+     */
+    private static ButtonEvent buttonEvent(String message) {
+        return switch (message.substring(2)) {
+            case "P" -> ButtonEvent.PRESS;
+            case "R" -> ButtonEvent.RELEASE;
+            case "H" -> ButtonEvent.HOLD;
+            case "DT" -> ButtonEvent.DOUBLE_TAP;
+            default -> throw new IllegalArgumentException("Unknown button action " + message);
+        };
     }
 
     private void declareUnknownKeypad(String address) {

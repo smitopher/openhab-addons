@@ -24,6 +24,7 @@ import java.util.Map;
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openhab.binding.lutron.internal.keypad.ButtonEvent;
 import org.openhab.core.config.core.Configuration;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.Thing;
@@ -139,16 +140,16 @@ public class HwDimmerHandlerTest {
     @Test
     public void tapMessagesFireTriggerEventsOnlyWhenTheThingHasTheChannel() {
         org.openhab.core.thing.ChannelUID tap = new org.openhab.core.thing.ChannelUID(THING_UID, "tap");
-        handler.handleTap("KBP");
+        handler.handleTap(ButtonEvent.PRESS);
         verify(callback, never()).channelTriggered(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
 
         when(thing.getChannel("tap")).thenReturn(org.openhab.core.thing.binding.builder.ChannelBuilder.create(tap)
                 .withKind(org.openhab.core.thing.type.ChannelKind.TRIGGER).build());
-        handler.handleTap("KBP");
-        handler.handleTap("KBR");
-        handler.handleTap("KBH");
-        handler.handleTap("KBDT");
+        handler.handleTap(ButtonEvent.PRESS);
+        handler.handleTap(ButtonEvent.RELEASE);
+        handler.handleTap(ButtonEvent.HOLD);
+        handler.handleTap(ButtonEvent.DOUBLE_TAP);
 
         verify(callback).channelTriggered(thing, tap, "PRESSED");
         verify(callback).channelTriggered(thing, tap, "RELEASED");

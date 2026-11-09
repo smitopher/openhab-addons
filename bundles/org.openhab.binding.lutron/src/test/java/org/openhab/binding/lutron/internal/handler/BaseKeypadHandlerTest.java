@@ -13,28 +13,36 @@
 package org.openhab.binding.lutron.internal.handler;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.ignoreStubs;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
-import static org.mockito.Mockito.when;
+
+import java.util.Map;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.openhab.binding.lutron.internal.KeypadComponent;
+import org.openhab.binding.lutron.internal.discovery.project.ComponentType;
 import org.openhab.binding.lutron.internal.protocol.lip.LutronCommandType;
+import org.openhab.core.config.core.Configuration;
 import org.openhab.core.library.types.OnOffType;
 import org.openhab.core.library.types.OpenClosedType;
 import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.CommonTriggerEvents;
 import org.openhab.core.thing.Thing;
+import org.openhab.core.thing.ThingTypeUID;
 import org.openhab.core.thing.ThingUID;
 import org.openhab.core.thing.binding.ThingHandlerCallback;
+import org.openhab.core.thing.binding.builder.ThingBuilder;
 
 /**
  * Tests for the keypad button event handling in {@link BaseKeypadHandler}.
@@ -44,12 +52,17 @@ import org.openhab.core.thing.binding.ThingHandlerCallback;
 @NonNullByDefault
 public class BaseKeypadHandlerTest {
 
+    private static final long WAIT_MS = 5000;
     private static final int BUTTON_1 = 1;
     private static final int CCI_1 = 25;
 
     private static final ThingUID THING_UID = new ThingUID("lutron", "keypad", "test");
     private static final ChannelUID BUTTON_1_UID = new ChannelUID(THING_UID, "button1");
     private static final ChannelUID CCI_1_UID = new ChannelUID(THING_UID, "cci1");
+
+    private record Component(int id, String channel, String description,
+            ComponentType type) implements KeypadComponent {
+    }
 
     /**
      * Minimal concrete keypad handler with a fixed component layout: one button and one CCI.
@@ -58,12 +71,12 @@ public class BaseKeypadHandlerTest {
     private static class TestKeypadHandler extends BaseKeypadHandler {
         TestKeypadHandler(Thing thing) {
             super(thing);
-            componentChannelMap.put(BUTTON_1, "button1");
-            componentChannelMap.put(CCI_1, "cci1");
         }
 
         @Override
         protected void configureComponents(@Nullable String model) {
+            buttonList.add(new Component(BUTTON_1, "button1", "Button 1", ComponentType.BUTTON));
+            cciList.add(new Component(CCI_1, "cci1", "CCI 1", ComponentType.CCI));
         }
 
         @Override
@@ -85,17 +98,35 @@ public class BaseKeypadHandlerTest {
     private @NonNullByDefault({}) Thing thing;
     private @NonNullByDefault({}) ThingHandlerCallback callback;
     private @NonNullByDefault({}) TestKeypadHandler handler;
+    private boolean initialized;
 
     @BeforeEach
     public void setUp() {
-        thing = mock(Thing.class);
-        when(thing.getUID()).thenReturn(THING_UID);
+        thing = ThingBuilder.create(new ThingTypeUID("lutron", "keypad"), THING_UID)
+                .withConfiguration(new Configuration(Map.of("integrationId", 1))).build();
         callback = mock(ThingHandlerCallback.class);
         handler = new TestKeypadHandler(thing);
         handler.setCallback(callback);
+        initialized = false;
+    }
+
+    /**
+     * Initializes the handler on first use, so that tests can set the handler's flags first, and waits for the
+     * channels to be created. Interactions from the initialization are cleared.
+     */
+    private void initializeOnce() {
+        if (initialized) {
+            return;
+        }
+        initialized = true;
+        handler.initialize();
+        verify(callback, timeout(WAIT_MS)).thingUpdated(any());
+        thing = handler.getThing();
+        clearInvocations(callback);
     }
 
     private void receiveDeviceUpdate(int component, int action) {
+        initializeOnce();
         handler.handleUpdate(LutronCommandType.DEVICE, String.valueOf(component), String.valueOf(action));
     }
 

@@ -28,6 +28,7 @@ import java.util.Map;
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openhab.binding.lutron.internal.keypad.ButtonEvent;
 import org.openhab.core.config.core.Configuration;
 import org.openhab.core.library.types.StringType;
 import org.openhab.core.thing.Bridge;
@@ -180,11 +181,11 @@ public class HwKeypadHandlerTest {
     public void buttonMessagesFireTriggerEvents() {
         handler.initialize();
 
-        handler.handleButton("KBP", 3);
-        handler.handleButton("KBH", 3);
-        handler.handleButton("KBDT", 3);
-        handler.handleButton("KBR", 3);
-        handler.handleButton("KBP", 99);
+        handler.handleButton(ButtonEvent.PRESS, 3);
+        handler.handleButton(ButtonEvent.HOLD, 3);
+        handler.handleButton(ButtonEvent.DOUBLE_TAP, 3);
+        handler.handleButton(ButtonEvent.RELEASE, 3);
+        handler.handleButton(ButtonEvent.PRESS, 99);
 
         ChannelUID button = channel("button3");
         verify(callback).channelTriggered(thing, button, CommonTriggerEvents.PRESSED);

@@ -16,16 +16,20 @@ import static org.openhab.binding.lutron.internal.hw.HwConstants.CHANNEL_PRESS;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.lutron.internal.KeypadComponent;
+import org.openhab.binding.lutron.internal.discovery.project.ComponentType;
+import org.openhab.binding.lutron.internal.keypad.ButtonEvent;
+import org.openhab.binding.lutron.internal.keypad.KeypadChannels;
+import org.openhab.binding.lutron.internal.keypad.KeypadChannels.ChannelSpec;
 import org.openhab.binding.lutron.internal.keypadconfig.KeypadConfigHw;
 import org.openhab.core.library.types.StringType;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.Channel;
 import org.openhab.core.thing.ChannelUID;
-import org.openhab.core.thing.CommonTriggerEvents;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
@@ -61,8 +65,10 @@ public class HwKeypadHandler extends BaseThingHandler {
     private final Logger logger = LoggerFactory.getLogger(HwKeypadHandler.class);
 
     private final KeypadConfigHw keypadConfig = new KeypadConfigHw();
-    private final KeypadChannelSupport support = new KeypadChannelSupport(new SupportHost(), BUTTON_CHANNEL_TYPE,
-            LED_CHANNEL_TYPE, "String");
+    // L232 reports the release after a hold, so no release is added after a hold
+    private final KeypadChannels channels = new KeypadChannels(new ChannelsHost(), Map.of(ComponentType.BUTTON,
+            ChannelSpec.trigger(BUTTON_CHANNEL_TYPE), ComponentType.LED, ChannelSpec.state(LED_CHANNEL_TYPE, "String")),
+            false);
 
     private volatile @Nullable String address;
 
@@ -70,7 +76,7 @@ public class HwKeypadHandler extends BaseThingHandler {
         super(thing);
     }
 
-    private class SupportHost implements KeypadChannelSupport.Host {
+    private class ChannelsHost implements KeypadChannels.Host {
         @Override
         public Thing getThing() {
             return HwKeypadHandler.this.getThing();
@@ -115,7 +121,7 @@ public class HwKeypadHandler extends BaseThingHandler {
 
         Channel press = ChannelBuilder.create(new ChannelUID(thing.getUID(), CHANNEL_PRESS), "String")
                 .withType(PRESS_CHANNEL_TYPE).build();
-        support.configure(components, List.of(press));
+        channels.configure(components, List.of(press));
 
         Bridge bridge = getBridge();
         if (bridge == null || bridge.getStatus() != ThingStatus.ONLINE) {
@@ -149,7 +155,7 @@ public class HwKeypadHandler extends BaseThingHandler {
             handlePress(command.toString());
             return;
         }
-        Integer id = support.componentFor(channelUID);
+        Integer id = channels.componentFor(channelUID);
         if (id == null || !keypadConfig.isLed(id)) {
             return;
         }
@@ -198,19 +204,9 @@ public class HwKeypadHandler extends BaseThingHandler {
 
     /**
      * Passes a button message of the processor on to the trigger channel of the button.
-     *
-     * @param action the L232 message name: KBP, KBR, KBH or KBDT
-     * @param button the button number
      */
-    void handleButton(String action, int button) {
-        String event = switch (action) {
-            case "KBP" -> CommonTriggerEvents.PRESSED;
-            case "KBR" -> CommonTriggerEvents.RELEASED;
-            case "KBH" -> CommonTriggerEvents.LONG_PRESSED;
-            case "KBDT" -> CommonTriggerEvents.DOUBLE_PRESSED;
-            default -> null;
-        };
-        if (event != null && !support.trigger(KeypadConfigHw.buttonId(button), event)) {
+    void handleButton(ButtonEvent event, int button) {
+        if (!channels.buttonEvent(KeypadConfigHw.buttonId(button), event, false)) {
             logger.debug("Keypad {} has no button {}", address, button);
         }
     }
@@ -224,7 +220,7 @@ public class HwKeypadHandler extends BaseThingHandler {
         for (int i = 0; i < states.length() && i < KeypadConfigHw.MAX_BUTTONS; i++) {
             int digit = Character.digit(states.charAt(i), 10);
             if (digit >= 0 && digit < LED_STATES.size()) {
-                support.update(KeypadConfigHw.ledId(i + 1), new StringType(LED_STATES.get(digit)));
+                channels.update(KeypadConfigHw.ledId(i + 1), new StringType(LED_STATES.get(digit)));
             } else {
                 logger.debug("Ignoring state '{}' of LED {} of keypad {}", states.charAt(i), i + 1, address);
             }

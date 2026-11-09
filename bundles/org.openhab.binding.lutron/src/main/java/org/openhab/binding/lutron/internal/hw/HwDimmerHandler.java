@@ -17,11 +17,11 @@ import static org.openhab.binding.lutron.internal.hw.HwConstants.CHANNEL_TAP;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.openhab.binding.lutron.internal.keypad.ButtonEvent;
 import org.openhab.core.library.types.OnOffType;
 import org.openhab.core.library.types.PercentType;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
-import org.openhab.core.thing.CommonTriggerEvents;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
@@ -142,19 +142,13 @@ public class HwDimmerHandler extends BaseThingHandler {
 
     /**
      * Passes a tap on the dimmer's switch on to the {@code tap} channel.
-     *
-     * @param action the matching keypad message name: KBP, KBR, KBH or KBDT
      */
-    void handleTap(String action) {
-        String event = switch (action) {
-            case "KBP" -> CommonTriggerEvents.PRESSED;
-            case "KBR" -> CommonTriggerEvents.RELEASED;
-            case "KBH" -> CommonTriggerEvents.LONG_PRESSED;
-            case "KBDT" -> CommonTriggerEvents.DOUBLE_PRESSED;
-            default -> null;
-        };
-        if (event != null && thing.getChannel(CHANNEL_TAP) != null) {
-            triggerChannel(CHANNEL_TAP, event);
+    void handleTap(ButtonEvent event) {
+        if (thing.getChannel(CHANNEL_TAP) != null) {
+            // L232 reports the release after a hold, as for keypad buttons
+            for (String triggerEvent : event.triggerEvents(false)) {
+                triggerChannel(CHANNEL_TAP, triggerEvent);
+            }
         }
     }
 

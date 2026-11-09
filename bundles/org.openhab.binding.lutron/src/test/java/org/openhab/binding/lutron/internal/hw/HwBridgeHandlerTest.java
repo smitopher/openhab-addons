@@ -24,6 +24,7 @@ import java.util.List;
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openhab.binding.lutron.internal.keypad.ButtonEvent;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.Thing;
 
@@ -195,10 +196,10 @@ public class HwBridgeHandlerTest {
         handler.receive("KBDT, [01:04:02], 24");
         handler.receive("KBR, [01:04:02],  3");
 
-        verify(keypadHandler).handleButton("KBP", 3);
-        verify(keypadHandler).handleButton("KBH", 3);
-        verify(keypadHandler).handleButton("KBDT", 24);
-        verify(keypadHandler).handleButton("KBR", 3);
+        verify(keypadHandler).handleButton(ButtonEvent.PRESS, 3);
+        verify(keypadHandler).handleButton(ButtonEvent.HOLD, 3);
+        verify(keypadHandler).handleButton(ButtonEvent.DOUBLE_TAP, 24);
+        verify(keypadHandler).handleButton(ButtonEvent.RELEASE, 3);
         verify(discoveryService, never()).declareUnknownKeypad(org.mockito.ArgumentMatchers.anyString());
     }
 
@@ -216,7 +217,7 @@ public class HwBridgeHandlerTest {
 
         verify(discoveryService).declareUnknownKeypad("[01:04:05]");
         verify(discoveryService).declareUnknownKeypad("[01:08:02:07]");
-        verify(keypadHandler, never()).handleButton(org.mockito.ArgumentMatchers.anyString(),
+        verify(keypadHandler, never()).handleButton(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyInt());
     }
 
@@ -225,8 +226,8 @@ public class HwBridgeHandlerTest {
         handler.receive("DBP, [01:01:03:06:01], 1");
         handler.receive("DBDT, [01:01:03:06:01], 1");
 
-        verify(dimmerHandler).handleTap("KBP");
-        verify(dimmerHandler).handleTap("KBDT");
+        verify(dimmerHandler).handleTap(ButtonEvent.PRESS);
+        verify(dimmerHandler).handleTap(ButtonEvent.DOUBLE_TAP);
         verify(discoveryService, never()).declareUnknownKeypad(org.mockito.ArgumentMatchers.anyString());
     }
 
@@ -245,7 +246,7 @@ public class HwBridgeHandlerTest {
         handler.receive("KBP, [01:04:02], x");
         handler.receive("KLS");
 
-        verify(keypadHandler, never()).handleButton(org.mockito.ArgumentMatchers.anyString(),
+        verify(keypadHandler, never()).handleButton(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyInt());
     }
 }
