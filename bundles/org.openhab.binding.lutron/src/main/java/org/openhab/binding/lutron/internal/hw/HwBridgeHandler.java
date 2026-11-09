@@ -23,9 +23,9 @@ import java.util.function.Function;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.openhab.binding.lutron.internal.keypad.ButtonEvent;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
-import org.openhab.core.thing.CommonTriggerEvents;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.binding.BaseBridgeHandler;
 import org.openhab.core.thing.binding.ThingHandler;
@@ -150,11 +150,10 @@ public abstract class HwBridgeHandler extends BaseBridgeHandler {
         String address = HwAddress.normalize(data[1]);
         int button = Integer.parseInt(data[2]);
         HwKeypadHandler handler = findHandler(HwKeypadHandler.class, address, HwKeypadHandler::getAddress);
-        String event = triggerEvent(data[0]);
         if (handler == null) {
             declareUnknownKeypad(address);
-        } else if (event != null) {
-            handler.handleButton(event, button);
+        } else {
+            handler.handleButton(buttonEvent(data[0]), button);
         }
     }
 
@@ -171,20 +170,21 @@ public abstract class HwBridgeHandler extends BaseBridgeHandler {
     private void handleDimmerTap(String[] data) {
         String address = HwAddress.normalize(data[1]);
         HwDimmerHandler handler = findHandler(HwDimmerHandler.class, address, HwDimmerHandler::getAddress);
-        String event = triggerEvent(data[0]);
-        if (handler != null && event != null) {
-            handler.handleTap(event);
+        if (handler != null) {
+            handler.handleTap(buttonEvent(data[0]));
         }
     }
 
-    // Keypad buttons (KB) and dimmer taps (DB) use the same suffixes: P, R, H (hold) and DT (double tap)
-    private static @Nullable String triggerEvent(String message) {
+    /**
+     * Maps the action of a keypad button message (KBP, KBR, KBH, KBDT) or dimmer tap message (DBP, DBR, DBH, DBDT).
+     */
+    private static ButtonEvent buttonEvent(String message) {
         return switch (message.substring(2)) {
-            case "P" -> CommonTriggerEvents.PRESSED;
-            case "R" -> CommonTriggerEvents.RELEASED;
-            case "H" -> CommonTriggerEvents.LONG_PRESSED;
-            case "DT" -> CommonTriggerEvents.DOUBLE_PRESSED;
-            default -> null;
+            case "P" -> ButtonEvent.PRESS;
+            case "R" -> ButtonEvent.RELEASE;
+            case "H" -> ButtonEvent.HOLD;
+            case "DT" -> ButtonEvent.DOUBLE_TAP;
+            default -> throw new IllegalArgumentException("Unknown button action " + message);
         };
     }
 
