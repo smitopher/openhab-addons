@@ -61,7 +61,11 @@ public class FineOffsetDataParser {
         return null;
     }
 
-    public Map<SensorGatewayBinding, SensorDevice> getRegisteredSensors(byte[] data,
+    /**
+     * @return the paired sensors, or {@code null} if the outdoor unit at index 0 cannot be told apart (WH24 or WH65)
+     *         because {@code isUseWh24} has no answer
+     */
+    public @Nullable Map<SensorGatewayBinding, SensorDevice> getRegisteredSensors(byte[] data,
             Supplier<@Nullable Boolean> isUseWh24) {
         /*
          * Pos | Length | Description
@@ -94,8 +98,12 @@ public class FineOffsetDataParser {
             if (sensorCandidates.size() == 1) {
                 sensorGatewayBinding = sensorCandidates.getFirst();
             } else if (sensorCandidates.size() == 2 && data[idx] == 0) {
-                sensorGatewayBinding = Boolean.TRUE.equals(isUseWh24.get()) ? SensorGatewayBinding.WH24
-                        : SensorGatewayBinding.WH65;
+                Boolean useWh24 = isUseWh24.get();
+                if (useWh24 == null) {
+                    // reporting a WH65 for a WH24 would mark the WH24 Thing as gone
+                    return null;
+                }
+                sensorGatewayBinding = useWh24 ? SensorGatewayBinding.WH24 : SensorGatewayBinding.WH65;
             }
             if (sensorGatewayBinding == null) {
                 logger.debug("too many sensor candidates for (id={}) and index {}: {}", id, data[idx],

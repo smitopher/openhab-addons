@@ -59,13 +59,15 @@ public class EcowittDataParser {
 
     /**
      * Parses a {@code get_livedata_info} response into the measured values.
+     *
+     * @return the measured values, or {@code null} if the response is not a JSON object
      */
-    public List<MeasuredValue> parseLiveData(String json) {
-        List<MeasuredValue> result = new ArrayList<>();
+    public @Nullable List<MeasuredValue> parseLiveData(String json) {
         JsonObject root = parseObject(json);
         if (root == null) {
-            return result;
+            return null;
         }
+        List<MeasuredValue> result = new ArrayList<>();
         for (HttpGroup group : HttpGroup.values()) {
             JsonElement element = root.get(group.getJsonKey());
             if (element == null) {
@@ -74,9 +76,7 @@ public class EcowittDataParser {
             switch (group.getKeying()) {
                 case CODE:
                     if (element.isJsonArray()) {
-                        for (JsonElement entry : element.getAsJsonArray()) {
-                            parseCodeEntry(group, entry.getAsJsonObject(), result);
-                        }
+                        forEachObject(element, entry -> parseCodeEntry(group, entry, result));
                     }
                     break;
                 case FIELD:
@@ -94,13 +94,13 @@ public class EcowittDataParser {
     }
 
     private void parseCodeEntry(HttpGroup group, JsonObject entry, List<MeasuredValue> result) {
-        if (!entry.has("id") || !entry.has("val")) {
+        String id = asString(entry, "id");
+        String val = asString(entry, "val");
+        if (id.isEmpty() || val.isEmpty()) {
             return;
         }
-        String id = entry.get("id").getAsString();
-        String val = entry.get("val").getAsString();
         @Nullable
-        String unit = entry.has("unit") ? entry.get("unit").getAsString() : null;
+        String unit = asStringOrNull(entry, "unit");
         @Nullable
         HttpBinding binding = registry.http(group, id);
         if (binding == null) {
@@ -112,7 +112,7 @@ public class EcowittDataParser {
 
     private void parseFields(HttpGroup group, JsonObject obj, @Nullable Integer channel, List<MeasuredValue> result) {
         @Nullable
-        String unit = obj.has("unit") ? obj.get("unit").getAsString() : null;
+        String unit = asStringOrNull(obj, "unit");
         for (Map.Entry<String, JsonElement> field : obj.entrySet()) {
             @Nullable
             HttpBinding binding = registry.http(group, field.getKey());
@@ -145,57 +145,68 @@ public class EcowittDataParser {
      *
      * @param pages the JSON of each requested page
      * @param useWh24 whether the gateway uses a WH24 (vs. WH65) for the sensor sharing index 0
+     * @return the paired sensors, or {@code null} if a page is not a JSON array, as its sensors would otherwise look
+     *         unpaired
      */
-    public Map<SensorGatewayBinding, SensorDevice> parseSensors(List<String> pages, boolean useWh24) {
+    public @Nullable Map<SensorGatewayBinding, SensorDevice> parseSensors(List<String> pages,
+            @Nullable Boolean useWh24) {
         Map<SensorGatewayBinding, SensorDevice> result = new LinkedHashMap<>();
+        boolean[] complete = { true };
         for (String page : pages) {
             JsonArray array;
             try {
                 array = JsonParser.parseString(page).getAsJsonArray();
             } catch (RuntimeException e) {
                 logger.debug("failed to parse get_sensors_info page", e);
-                continue;
+                return null;
             }
-            for (JsonElement element : array) {
-                parseSensor(element.getAsJsonObject(), useWh24, result);
-            }
+            forEachObject(array, obj -> complete[0] &= parseSensor(obj, useWh24, result));
         }
-        return result;
+        // without knowing whether index 0 is a WH24 or a WH65, the list would misreport that sensor
+        return complete[0] ? result : null;
     }
 
-    private void parseSensor(JsonObject obj, boolean useWh24, Map<SensorGatewayBinding, SensorDevice> result) {
+    /**
+     * @return {@code false} if the sensor could not be identified because {@code useWh24} is unknown
+     */
+    private boolean parseSensor(JsonObject obj, @Nullable Boolean useWh24,
+            Map<SensorGatewayBinding, SensorDevice> result) {
         String idString = asString(obj, "id");
         if (idString.isEmpty() || DISABLED_SENSOR.equalsIgnoreCase(idString)
                 || REGISTERING_SENSOR.equalsIgnoreCase(idString) || "0".equals(asString(obj, "idst"))) {
-            return;
+            return true;
         }
         Integer type = parseIntOrNull(asString(obj, "type"));
         if (type == null) {
-            return;
+            return true;
         }
         List<SensorGatewayBinding> candidates = SensorGatewayBinding.forIndex((byte) (int) type);
         if (candidates == null || candidates.isEmpty()) {
             logger.debug("unknown sensor type {}", type);
-            return;
+            return true;
         }
         SensorGatewayBinding sensorGatewayBinding;
         if (candidates.size() == 1) {
             sensorGatewayBinding = candidates.getFirst();
         } else if (candidates.size() == 2 && type == 0) {
+            if (useWh24 == null) {
+                return false;
+            }
             sensorGatewayBinding = useWh24 ? SensorGatewayBinding.WH24 : SensorGatewayBinding.WH65;
         } else {
             logger.debug("ambiguous sensor type {}: {}", type, candidates);
-            return;
+            return true;
         }
         int id;
         try {
             id = (int) Long.parseLong(idString, 16);
         } catch (NumberFormatException e) {
-            return;
+            return true;
         }
         BatteryStatus batteryStatus = sensorGatewayBinding.getHttpBatteryStatus((byte) parseInt(asString(obj, "batt")));
         int signal = parseInt(asString(obj, "signal"));
         result.put(sensorGatewayBinding, new SensorDevice(id, sensorGatewayBinding, batteryStatus, signal));
+        return true;
     }
 
     /**
@@ -289,6 +300,11 @@ public class EcowittDataParser {
     private static String asString(JsonObject obj, String key) {
         JsonElement element = obj.get(key);
         return element != null && element.isJsonPrimitive() ? element.getAsString() : "";
+    }
+
+    private static @Nullable String asStringOrNull(JsonObject obj, String key) {
+        String value = asString(obj, key);
+        return value.isEmpty() ? null : value;
     }
 
     private static int parseInt(String value) {

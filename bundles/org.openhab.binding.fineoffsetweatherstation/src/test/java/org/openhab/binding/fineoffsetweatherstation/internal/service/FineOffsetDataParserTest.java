@@ -22,12 +22,14 @@ import org.openhab.binding.fineoffsetweatherstation.internal.domain.Command;
 import org.openhab.binding.fineoffsetweatherstation.internal.domain.DebugDetails;
 import org.openhab.binding.fineoffsetweatherstation.internal.domain.Protocol;
 import org.openhab.binding.fineoffsetweatherstation.internal.domain.Sensor;
+import org.openhab.binding.fineoffsetweatherstation.internal.domain.SensorGatewayBinding;
 import org.openhab.binding.fineoffsetweatherstation.internal.domain.response.MeasuredValue;
 import org.openhab.core.library.types.DateTimeType;
 import org.openhab.core.util.HexUtils;
 
 /**
  * @author Andreas Berger - Initial contribution
+ * @author Christopher Smith - Tests for the outdoor unit identification
  */
 @NonNullByDefault
 class FineOffsetDataParserTest {
@@ -245,5 +247,15 @@ class FineOffsetDataParserTest {
         Assertions.assertThat(data).extracting(MeasuredValue::getChannelId, MeasuredValue::getSensor).containsExactly( //
                 Assertions.tuple("moisture-soil-channel-1", Sensor.WH51), //
                 Assertions.tuple("temperature-outdoor", null));
+    }
+
+    @Test
+    void outdoorUnitIsNotGuessedWithoutSystemInfo() {
+        // one sensor at index 0 (WH24 or WH65): index, id, battery, signal
+        byte[] data = HexUtils.hexToBytes("FFFF3C000B" + "00" + "000000C2" + "00" + "04" + "00");
+        FineOffsetDataParser parser = new FineOffsetDataParser(Protocol.DEFAULT);
+        Assertions.assertThat(parser.getRegisteredSensors(data, () -> null)).isNull();
+        Assertions.assertThat(parser.getRegisteredSensors(data, () -> true))
+                .containsOnlyKeys(SensorGatewayBinding.WH24);
     }
 }
